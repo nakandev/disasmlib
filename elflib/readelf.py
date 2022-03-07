@@ -100,6 +100,19 @@ class ReadElf(object):
         self.f = f
         self.elf_header = None
         self.section_headers = list()
+        self.symbol_tables = list()
+
+    @property
+    def eh(self):
+        return self.elf_header
+
+    @property
+    def shs(self):
+        return self.section_headers
+
+    @property
+    def sts(self):
+        return self.symbol_tables
 
     def read_elf_header(self):
         self.f.seek(0)
@@ -142,9 +155,9 @@ class ReadElf(object):
         for sh in shs:
             offset = sh.sh_name
             for i in range(offset, len(binary)):
-                if binary[i] == b'\x00':
+                if binary[i] == b'\x00' or binary[i] == 0:
                     break
-            sh.name = binary[offset:i]
+            sh.name = binary[offset:i].decode()
         self.section_headers = shs
         return self.section_headers
 
@@ -182,8 +195,8 @@ class ReadElf(object):
                 st.name = ''
             else:
                 for i in range(offset, len(binary)):
-                    if binary[i] == b'\x00':
+                    if binary[i] == b'\x00' or binary[i] == 0:
                         break
-                st.name = binary[offset:i]
+                st.name = binary[offset:i].decode()
         self.symbol_tables = sts
         return self.symbol_tables

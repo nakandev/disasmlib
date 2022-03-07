@@ -6,6 +6,7 @@ import subprocess
 from .machine import X86Machine
 from .machine import *  # noqa
 from .readelf import ReadElf
+from .util import OperatorSequenceAutomaton
 
 
 __version__ = '0.1.0'
@@ -20,6 +21,7 @@ class AsmOperator(object):
         self.binops = list()
         self.strops = list()
         self.comment = str()
+        self.pseudo = None
         if data is not None:
             self.rawdata = data
             self._split_identifiers()
@@ -147,6 +149,34 @@ class AsmFunc(object):
         for block in self.blocks:
             ops += block.operators
         return ops
+
+    def block_routes_to_terminals(self):
+        blocks_routes = list()
+
+        def _walk(block, route):
+            if len(block.postblocks) == 0:
+                blocks_routes.append(list() + route)
+            for child in block.postblocks:
+                if child not in route:
+                    _walk(child, route + [child])
+
+        if len(self.blocks) > 0:
+            first = self.blocks[0]
+            _walk(first, [first])
+            return blocks_routes
+
+    def operators_path(self, start, end):
+        path = list()
+        block = end
+        while True:
+            path.append(block)
+            if block == start:
+                break
+            if len(block.preblocks) == 0:
+                break
+            else:
+                block = block.preblocks[0]
+        return path
 
     @property
     def is_leaf(self):
@@ -466,7 +496,7 @@ class ElfFile(object):
     def _read_disasm(self):
         if self.elfpath_is_elf:
             proc = subprocess.Popen(
-                [self.cmd['objdump'], '-d', self.elfpath],
+                [self.cmd['objdump'], '-d', '-M', 'no-aliases', self.elfpath],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -481,6 +511,7 @@ class ElfFile(object):
         self._split_block_by_jump_targets()
         if not self.elfpath_is_elf:
             self._collect_func_list_by_tree()
+        self._set_pseudo_instructions()
 
     def _build_first_asm_tree(self, disasmstr):
         re_section = re.compile(r'^Disassembly of section ([^ ]+):')
@@ -646,9 +677,10 @@ class ElfFile(object):
                 for block in section.blocks:
                     try:
                         current_func = self._get_func(block.addr)
-                        current_func.blocks.append(block)
                     except ValueError:
                         pass
+                    if current_func:
+                        current_func.blocks.append(block)
             call_ops.sort(key=lambda x: x[1])
             for op, addr in call_ops:
                 for func in self.funcs:
@@ -656,6 +688,53 @@ class ElfFile(object):
                         op.func.add_calleefuncs(func)
                         break
         _update_func_blocks()
+
+    def _set_pseudo_instructions(self):
+        def _init_automaton(op, opidx):
+            pibot = 0
+            pseudo_dst = self.machine._pseudos[opidx][1][pibot]
+            match = pseudo_dst.search(' '.join(op.op))
+            return match is not None
+
+        def _update_automaton(op, automaton):
+            opidx, pibot, srcs = automaton
+            pseudo_dst = self.machine._pseudos[opidx][1][pibot]
+            match = pseudo_dst.search(' '.join(op.op))
+            if match:
+                automaton[1] += 1
+                return automaton[1]
+            else:
+                automatons.remove(automaton)
+                return 0
+
+        for section in self.disasm.sections:
+            for func in section.funcs:
+                for routeno, blocks_routes in enumerate(func.block_routes_to_terminals()):
+                    ops = list()
+                    for block in blocks_routes:
+                        ops.extend(block.operators)
+                    automatons = list()
+                    for op in ops:
+                        for pidx in range(len(self.machine.pseudos)):
+                            sequence = self.machine._pseudos[pidx][1]
+                            automaton = OperatorSequenceAutomaton(sequence)
+                            automaton.update(op)
+                            if automaton.started():
+                                item = (pidx, automaton)
+                                automatons.append(item)
+                        for item in automatons[:]:
+                            pidx, automaton = item
+                            if automaton.rejected():
+                                automatons.remove(item)
+                                continue
+                            elif automaton.accepted():
+                                dst = self.machine.pseudos[pidx][0]
+                                srcs = automaton.srcs
+                                op.pseudo = (dst[0], srcs)
+                                automatons.remove(item)
+                                continue
+                            automaton.update(op)
+                        pass
 
     def dump_disasm_tree(self):
         def writeline(*args):

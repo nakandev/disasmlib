@@ -35,15 +35,27 @@ def revregion(src, start=0, end=-1):
     return reversed(region(src, start, end))
 
 
-def match_sequence(self, sequence, operators):
-    seqidx = 0
-    match_ops = list()
-    for opidx, op in enumerate(operators):
-        opstr = ' '.join(op.op)
-        match = re.match(sequence[seqidx], opstr)
+class OperatorSequenceAutomaton(object):
+    def __init__(self, sequence):
+        self.sequence = sequence
+        self.srcs = list()
+        self.state = None
+
+    def update(self, operator):
+        seqidx = len(self.srcs)
+        opstr = ' '.join(operator.op)
+        match = re.match(self.sequence[seqidx], opstr)
         if match:
-            match_ops.append(op)
+            self.srcs.append(operator)
+            self.state = len(self.srcs)
         else:
-            return None
-        seqidx += 1
-    return match_ops
+            self.state = False
+
+    def started(self):
+        return self.state > 0
+
+    def rejected(self):
+        return self.state is False
+
+    def accepted(self):
+        return self.state == len(self.sequence)

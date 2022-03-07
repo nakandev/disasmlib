@@ -14,6 +14,13 @@ class RISCVMachine(AsmMachine):
     calls = ('call', 'jal', 'jalr', 'c.jal', 'c.jalr')
     rets = ('ret', 'c.ret',)
 
+    pseudos = (
+        (('call',), (('auipc', '(x1|ra)'), ('jalr', '(x1|ra)', '((0x)?[0-9a-f]+)', '(x0|zero)'))),
+        (('call',), (('auipc', '(x1|ra)'), ('jalr', '(x1|ra)', '(x0|zero)', '((0x)?[0-9a-f]+)'))),
+        (('ret',), (('jalr', '(x0|zero)', '(x1|ra)', '0'),)),
+        (('ret',), (('jalr', '(x0|zero)', '0', '(x1|ra)'),)),
+    )
+
     def jump_addr(self, disasm, op):
         addr = None
         if op.op[0] in ('j', 'c.j') + self.branchs:
