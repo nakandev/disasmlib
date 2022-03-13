@@ -1,6 +1,6 @@
-======
-elflib
-======
+=========
+disasmlib
+=========
 
 Simple ELF & Disassembly code analyzer
 
@@ -24,13 +24,13 @@ Installation
 
 ::
 
-  $ pip install git+https://github.com/nakandev/elflib
+  $ pip install git+https://github.com/nakandev/disasmlib
 
 or
 
 ::
 
-  $ git clone git@github.com:nakandev/elflib.git <your_package_dir>
+  $ git clone git@github.com:nakandev/disasmlib.git <your_package_dir>
   $ export PYTHONPATH=<your_package_dir>:$PYTHONPATH
 
   
@@ -40,10 +40,10 @@ Usage
 
 ::
 
-  import elflib
+  import disasmlib
   
-  elf = elflib.ElfFile('test1-riscv.elf')
-  elf.set_machine(elflib.RISCVMachine())
+  elf = disasmlib.ElfFile('test1-riscv.elf')
+  elf.set_machine(disasmlib.RISCVMachine())
   elf.set_toolchain(dir='/your/riscv-gnu-toolchain/bin')
   elf.read()
   

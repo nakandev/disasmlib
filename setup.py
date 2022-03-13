@@ -23,17 +23,17 @@ def find_version(*file_paths):
 with open('README.rst') as f:
     long_description = f.read()
 
-setup(name='elflib',
-      version=find_version('elflib', '__init__.py'),
+setup(name='disasmlib',
+      version=find_version('disasmlib', '__init__.py'),
       description='Simple ELF & Disassembly code analyzer',
       long_description=long_description,
       author='nakandev',
       author_email='nakandev.s@gmail.com',
-      url='https://github.com/nakandev/elflib',
+      url='https://github.com/nakandev/disasmlib',
       license='MIT',
       install_requires=[],
       platforms='any',
       packages=find_packages(),
       package_data={},
-      namespace_packages=['elflib'],
+      namespace_packages=['disasmlib'],
       )

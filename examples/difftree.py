@@ -1,6 +1,6 @@
 from __future__ import print_function
 import argparse
-import elflib
+import disasmlib
 import difflib
 
 
@@ -131,7 +131,7 @@ def main():
 
     def elf_read(elfpath):
         try:
-            readelf = elflib.ReadElf(elfpath)
+            readelf = disasmlib.ReadElf(elfpath)
             eh = readelf.read_elf_header()
         except Exception:
             pass
@@ -139,11 +139,11 @@ def main():
         if eh.e_machine == 0xf3:
             if args.toolchain is None:
                 raise Exception('In RISC-V ELF format, --toolchain option must set')
-            elf = elflib.ElfFile(elfpath)
-            elf.set_machine(elflib.RISCVMachine())
+            elf = disasmlib.ElfFile(elfpath)
+            elf.set_machine(disasmlib.RISCVMachine())
             elf.set_toolchain(dir=args.toolchain)
         else:
-            elf = elflib.ElfFile(elfpath)
+            elf = disasmlib.ElfFile(elfpath)
         elf.read()
         return elf
 
