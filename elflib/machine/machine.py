@@ -38,5 +38,11 @@ class AsmMachine(object):
     def is_calls(self, op):
         return op.op[0] in self.calls
 
+    def is_nops(self, op):
+        opidx = 0
+        while op.op[opidx] == 'data16':
+            opidx += 1
+        return op.op[opidx].lower().startswith('nop')
+
     def is_rets(self, op):
         return op.op[0] in self.rets

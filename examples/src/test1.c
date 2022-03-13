@@ -8,6 +8,14 @@ int func1(int a, int b)
   return c;
 }
 
+int func2(int a, int b)
+{
+  int c;
+  if (a > b) c = a + b;
+  else       c = a - b;
+  return c;
+}
+
 void onlyprint(int a, int b)
 {
   printf("%d %d\n", a, b);

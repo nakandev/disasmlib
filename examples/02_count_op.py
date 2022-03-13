@@ -31,7 +31,6 @@ def main():
         if op.op[0] in ('mv', 'mov'):
             count += 1
     mov_num = count
-    elf.dump_disasm_tree()
     print('sections=%d, funcs=%d, blocks=%d, ops=%s' % (
         len(elf.disasm.sections),
         len(elf.disasm.funcs),

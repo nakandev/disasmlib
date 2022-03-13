@@ -55,6 +55,10 @@ class AsmOperator(object):
         return self.machine.is_calls(self)
 
     @property
+    def is_nops(self):
+        return self.machine.is_nops(self)
+
+    @property
     def is_rets(self):
         return self.machine.is_rets(self)
 
@@ -104,12 +108,32 @@ class AsmBlock(object):
         self.operators = list()
         self.preblocks = list()
         self.postblocks = list()
+        self.depth = -1
+        self.depth_terminal = -1
         for k, v in kwargs.items():
             setattr(self, k, v)
 
     @property
     def machine(self):
         return self.section.machine
+
+    def lastop(self, nonop=False):
+        idx = len(self.operators) - 1
+        if nonop:
+            while idx > 0 and self.operators[idx].is_nops:
+                idx -= 1
+        return self.operators[idx]
+
+    def copy_for_swap_postblocks(self):
+        block = AsmBlock()
+        block.addr = self.addr
+        block.label = self.label
+        block.section = self.section
+        block.func = self.func
+        block.operators = self.operators
+        block.preblocks = self.preblocks[:]
+        block.postblocks = self.postblocks[:]
+        return block
 
     def add_postblocks(self, blocks):
         blocks = [blocks] if isinstance(blocks, AsmBlock) else blocks
@@ -150,20 +174,48 @@ class AsmFunc(object):
             ops += block.operators
         return ops
 
-    def block_routes_to_terminals(self):
-        blocks_routes = list()
+    @property
+    def max_depth(self):
+        return max([block.depth for block in self.blocks])
 
-        def _walk(block, route):
-            if len(block.postblocks) == 0:
-                blocks_routes.append(list() + route)
+    def walk_blocks_by_depth(self):
+        def _walk(block, visited):
+            visited += [block]
+            yield block, True  # go foward
             for child in block.postblocks:
-                if child not in route:
-                    _walk(child, route + [child])
+                if child not in visited and child.func == self:
+                    [(yield _) for _ in _walk(child, visited)]
+            yield block, False  # go back
 
         if len(self.blocks) > 0:
-            first = self.blocks[0]
-            _walk(first, [first])
-            return blocks_routes
+            rest = self.blocks[:]
+            visited = []
+            while len(rest) > 0:
+                first = rest[0]
+                [(yield _) for _ in _walk(first, visited)]
+                for b in visited:
+                    if b in rest:
+                        rest.remove(b)
+
+    def walk_blocks_by_rank(self):
+        blocks = self.blocks
+        blocks = sorted(blocks, key=lambda b: b.depth_terminal)
+        blocks = sorted(blocks, key=lambda b: b.depth)
+        for block in blocks:
+            yield block
+
+    def block_routes_to_terminals(self):
+        routes = list()
+        route = list()
+        for block, gofoward in self.walk_blocks_by_depth():
+            if gofoward:
+                route.append(block)
+                if len(block.postblocks) == 0:
+                    routes.append(route[:])
+            else:
+                route.remove(block)
+            pass
+        return routes
 
     def operators_path(self, start, end):
         path = list()
@@ -496,7 +548,8 @@ class ElfFile(object):
     def _read_disasm(self):
         if self.elfpath_is_elf:
             proc = subprocess.Popen(
-                [self.cmd['objdump'], '-d', '-M', 'no-aliases', self.elfpath],
+                # [self.cmd['objdump'], '-d', '-M', 'no-aliases', self.elfpath],
+                [self.cmd['objdump'], '-d', self.elfpath],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -640,8 +693,6 @@ class ElfFile(object):
                             newblock.section = section
                             newblock.func = block.func
                             newblock.operators = operators1
-                            if op00_is_branchs:
-                                block.add_postblocks(newblock)
                             for op1 in operators1:
                                 op1.block = newblock
                             section.blocks.insert(bidx + 1, newblock)
@@ -655,19 +706,26 @@ class ElfFile(object):
                                 jump_addrs.pop(op0_addr_idx)
         _split_blocks()
 
-        def _make_jump_tree():
+        def _connect_next_block():
+            for bidx in range(len(self.disasm.blocks)):
+                if bidx == len(self.disasm.blocks) - 1:
+                    break
+                block0 = self.disasm.blocks[bidx]
+                block1 = self.disasm.blocks[bidx + 1]
+                lastop = block0.lastop(nonop=True)
+                if not (lastop.is_jumps or lastop.is_rets):
+                    block0.add_postblocks(block1)
+        _connect_next_block()
+
+        def _connect_jump_destination_block():
             jump_ops.sort(key=lambda x: x[1])
-            target_blocks = list() + self.disasm.blocks
+            target_blocks = self.disasm.blocks[:]
             for op, addr in jump_ops:
-                count = 0
                 for tblock in target_blocks:
                     if tblock.isin_addr(addr) and addr not in call_addrs:
                         op.block.add_postblocks(tblock)
                         break
-                    count += 1
-                for i in range(count):
-                    target_blocks.pop(0)
-        _make_jump_tree()
+        _connect_jump_destination_block()
 
         def _update_func_blocks():
             for section in self.disasm.sections:
@@ -689,7 +747,31 @@ class ElfFile(object):
                         break
         _update_func_blocks()
 
+        def _calc_depth():
+            for section in self.disasm.sections:
+                for func in section.funcs:
+                    depth = 0
+                    route = list()
+                    prev_foward = True
+                    for block, gofoward in func.walk_blocks_by_depth():
+                        if gofoward:
+                            route.append(block)
+                            block.depth = depth
+                            depth += 1
+                        else:
+                            depth -= 1
+                            route.remove(block)
+                            if prev_foward:
+                                for rblock in route:
+                                    if depth > rblock.depth_terminal:
+                                        rblock.depth_terminal = depth
+
+                        prev_foward = gofoward
+        _calc_depth()
+
     def _set_pseudo_instructions(self):
+        blocks_threshold = 150
+
         def _init_automaton(op, opidx):
             pibot = 0
             pseudo_dst = self.machine._pseudos[opidx][1][pibot]
@@ -709,6 +791,8 @@ class ElfFile(object):
 
         for section in self.disasm.sections:
             for func in section.funcs:
+                if len(func.blocks) > blocks_threshold:
+                    break
                 for routeno, blocks_routes in enumerate(func.block_routes_to_terminals()):
                     ops = list()
                     for block in blocks_routes:
@@ -735,35 +819,3 @@ class ElfFile(object):
                                 continue
                             automaton.update(op)
                         pass
-
-    def dump_disasm_tree(self):
-        def writeline(*args):
-            __f.write(' '.join(args) + '\n')
-        __f = open('test-debug.txt', 'w')
-
-        writeline('Func list: %d' % (len(self.funcs)))
-        tfuncs = sorted(self.funcs, key=lambda x: x.addr)
-        for func in tfuncs:
-            writeline(' %x %s' % (func.addr, func.name))
-
-        for section in self.disasm.sections:
-            writeline('Section:%s' % (section.name))
-            for block in section.blocks:
-                try:
-                    func = self._get_func(block.addr)
-                    s = ' Func:%x %s' % (func.addr, func.name)
-                    if func.is_leaf:
-                        s += ' [leaf]'
-                    if func.is_noreturn:
-                        s += ' [noret]'
-                    root_num = len([b for b in func.blocks if len(b.preblocks) == 0])
-                    s += ' root:%d' % root_num
-                    s += '(%s)' % ','.join([f.name for f in func.calleefuncs])
-                    writeline(s)
-                except Exception:
-                    pass
-                ops = '' if len(block.operators) == 0 else \
-                    '%s' % block.operators[0].op[0] if len(block.operators) == 1 else \
-                    '%s - %s' % (block.operators[0].op[0], block.operators[-1].op[0])
-                writeline('  Block:%x %s [%s]' % (
-                    block.addr, block.label, ops))
