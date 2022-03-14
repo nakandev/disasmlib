@@ -3,8 +3,8 @@ import glob
 import os
 import re
 import subprocess
-from .machine import X86Machine
-from .machine import *  # noqa
+import sys
+from .machine import estimate_machine
 from .readelf import ReadElf
 from .util import OperatorSequenceAutomaton
 
@@ -74,9 +74,9 @@ class AsmOperator(object):
             code, comment = line.rstrip(), ''
         else:
             if isinstance(min_sp, tuple):
-                code, comment = line.split(min_sp, 1)
+                code, comment = line.split(min_sp[0], 1)
                 code = code.rstrip()
-                comment, _ = comment.split(comment, 1)
+                comment, _ = comment.split(min_sp[1], 1)
             else:
                 code, comment = line.split(min_sp, 1)
                 code = code.rstrip()
@@ -184,7 +184,7 @@ class AsmFunc(object):
             yield block, True  # go foward
             for child in block.postblocks:
                 if child not in visited and child.func == self:
-                    [(yield _) for _ in _walk(child, visited)]
+                    for _ in _walk(child, visited): yield _  # noqa
             yield block, False  # go back
 
         if len(self.blocks) > 0:
@@ -192,7 +192,7 @@ class AsmFunc(object):
             visited = []
             while len(rest) > 0:
                 first = rest[0]
-                [(yield _) for _ in _walk(first, visited)]
+                for _ in _walk(first, visited): yield _  # noqa
                 for b in visited:
                     if b in rest:
                         rest.remove(b)
@@ -320,17 +320,18 @@ class DisasmFile(object):
 class ElfFile(object):
     def __init__(self, path):
         self.elfpath = path
-        self._machine = X86Machine()
+        self._machine = None
+        self._toolchain = None
         self._cmd = {
             'readelf': 'readelf',
             'nm': 'nm',
             'objdump': 'objdump',
         }
-        self.readelf = None
         self.sections = list()
         self.funcs = list()
         self.disasm = None
         self._rfunc = dict()
+        self.readelf = None
 
     @property
     def machine(self):
@@ -343,33 +344,13 @@ class ElfFile(object):
     def set_machine(self, value):
         self._machine = value
 
-    def set_toolchain(self, dir=None, prefix=None):
-        toolchain_dir = None
-        cmd_keys = ('readelf', 'nm', 'objdump')
-        cmd_dict = dict()
-        if dir is not None:
-            if os.path.isdir(dir):
-                toolchain_dir = dir
-            else:
-                raise FileNotFoundError(dir)
-        if prefix is None:
-            if self.machine is not None:
-                prefix = self.machine.command_prefix
-            else:
-                prefix = '*'
-        if toolchain_dir:
-            for k in cmd_keys:
-                path = os.path.join(toolchain_dir, prefix + k)
-                files = glob.glob(path)
-                if len(files) > 0:
-                    cmd_dict[k] = files[0]
-                else:
-                    raise FileNotFoundError(path)
-        self._cmd.update(cmd_dict)
+    def set_toolchain(self, value):
+        self._toolchain = value
 
     def read(self):
         os.environ['LANG'] = 'C'
         self._check_elfpath()
+        self._find_commands()
         self._read_header()
         self._read_disasm()
 
@@ -393,53 +374,77 @@ class ElfFile(object):
     def _check_elfpath(self):
         self.elfpath_is_elf = False
         try:
-            f = open(self.elfpath, 'rb')
-            magic = f.read(4)
-            if magic == b'\x7fELF':
-                self.elfpath_is_elf = True
+            self.readelf = ReadElf(self.elfpath)
+            self.readelf.read_elf_header()
+            self.elfpath_is_elf = True
         except FileNotFoundError:
             raise FileNotFoundError(self.elfpath)
         except Exception as e:
             raise e
         return self.elfpath_is_elf
 
+    def _find_commands(self):
+        cmd_keys = ('readelf', 'nm', 'objdump')
+        cmd_dict = dict()
+        if self._toolchain is None:
+            toolchain_dir, prefix = None, None
+        elif os.path.isdir(self._toolchain):
+            toolchain_dir, prefix = self._toolchain, None
+        else:
+            toolchain_dir, prefix = os.path.split(self._toolchain)
+        self.set_machine(estimate_machine(self.readelf))
+        if prefix is None:
+            if self.machine is not None:
+                prefix = self.machine.command_prefix
+            else:
+                prefix = '*'
+        if toolchain_dir:
+            for k in cmd_keys:
+                path = os.path.join(toolchain_dir, prefix + k)
+                files = glob.glob(path + '.exe')
+                files += glob.glob(path)
+                if len(files) > 0:
+                    cmd_dict[k] = files[0]
+                else:
+                    if sys.version_info[0] == 2:
+                        FileNotFoundError = IOError
+                    raise FileNotFoundError(path)
+        self._cmd.update(cmd_dict)
+
     def _read_header(self):
         self.sections = list()
         self.funcs = list()
         if not self.elfpath_is_elf:
             return
-        with open(self.elfpath, 'rb') as f:
-            readelf = ReadElf(f)
-            self.readelf = readelf
-            readelf.read_elf_header()
-            readelf.read_section_headers()
-            for sh in readelf.section_headers:
-                section = AsmSection(
-                    sh.name, sh.sh_type, sh.sh_addr, sh.sh_offset,
-                    sh.sh_size, sh.sh_entsize, sh.sh_flags, sh.sh_link,
-                    sh.sh_info, sh.sh_addralign)
-                section.elf = self
-                self.sections.append(section)
-            self.sections.sort(key=lambda x: x.addr)
-            readelf.read_symbol_tables()
-            for i, st in enumerate(readelf.symbol_tables):
-                if st.st_type == st.STT.index('FUNC'):
-                    func = AsmFunc()
-                    func.elf = self
-                    func.bind = st.st_bind
-                    func.addr = st.st_value
-                    func.size = st.st_size
-                    func.name = st.name
-                    self.funcs.append(func)
-                    # make index for self._get_func(addr)
-                    if st.st_bind == st.STB.index('WEAK'):
-                        self._rfunc.setdefault(func.addr, func)
-                    else:
-                        prefunc = self._rfunc.get(func.addr)
-                        if prefunc is None:
-                            self._rfunc[func.addr] = func
-                        elif prefunc.bind == st.STB.index('WEAK'):
-                            self._rfunc[func.addr] = func
+        readelf = self.readelf
+        readelf.read_section_headers()
+        for sh in readelf.section_headers:
+            section = AsmSection(
+                sh.name, sh.sh_type, sh.sh_addr, sh.sh_offset,
+                sh.sh_size, sh.sh_entsize, sh.sh_flags, sh.sh_link,
+                sh.sh_info, sh.sh_addralign)
+            section.elf = self
+            self.sections.append(section)
+        self.sections.sort(key=lambda x: x.addr)
+        readelf.read_symbol_tables()
+        for i, st in enumerate(readelf.symbol_tables):
+            if st.st_type == st.STT.index('FUNC'):
+                func = AsmFunc()
+                func.elf = self
+                func.bind = st.st_bind
+                func.addr = st.st_value
+                func.size = st.st_size
+                func.name = st.name
+                self.funcs.append(func)
+                # make index for self._get_func(addr)
+                if st.st_bind == st.STB.index('WEAK'):
+                    self._rfunc.setdefault(func.addr, func)
+                else:
+                    prefunc = self._rfunc.get(func.addr)
+                    if prefunc is None:
+                        self._rfunc[func.addr] = func
+                    elif prefunc.bind == st.STB.index('WEAK'):
+                        self._rfunc[func.addr] = func
             self.funcs.sort(key=lambda x: x.addr)
 
     def _collect_section_list_by_readelf(self):
@@ -554,6 +559,8 @@ class ElfFile(object):
                 stderr=subprocess.STDOUT,
             )
             out, err = proc.communicate()
+            if proc.returncode != 0:
+                raise Exception('Disassemble error with exitcode %d: %s' % (proc.returncode, out))
             out = out.decode()
             with open(self.elfpath + '.dis', 'w') as f:
                 f.write(out)
@@ -738,6 +745,7 @@ class ElfFile(object):
                     except ValueError:
                         pass
                     if current_func:
+                        block.func = current_func
                         current_func.blocks.append(block)
             call_ops.sort(key=lambda x: x[1])
             for op, addr in call_ops:
@@ -765,7 +773,6 @@ class ElfFile(object):
                                 for rblock in route:
                                     if depth > rblock.depth_terminal:
                                         rblock.depth_terminal = depth
-
                         prev_foward = gofoward
         _calc_depth()
 

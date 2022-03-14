@@ -4,7 +4,7 @@ import re
 class AsmMachine(object):
     _classes = list()
 
-    cmd_prefix = '*'
+    command_prefix = '*'
 
     jumps = ('jmp', 'jmpq',)
     branchs = ('je', 'jne',)

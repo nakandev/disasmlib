@@ -130,20 +130,8 @@ def main():
     elf2path = args.elf2
 
     def elf_read(elfpath):
-        try:
-            readelf = disasmlib.ReadElf(elfpath)
-            eh = readelf.read_elf_header()
-        except Exception:
-            pass
-
-        if eh.e_machine == 0xf3:
-            if args.toolchain is None:
-                raise Exception('In RISC-V ELF format, --toolchain option must set')
-            elf = disasmlib.ElfFile(elfpath)
-            elf.set_machine(disasmlib.RISCVMachine())
-            elf.set_toolchain(dir=args.toolchain)
-        else:
-            elf = disasmlib.ElfFile(elfpath)
+        elf = disasmlib.ElfFile(elfpath)
+        elf.set_toolchain(args.toolchain)
         elf.read()
         return elf
 
