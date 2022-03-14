@@ -207,14 +207,15 @@ class AsmFunc(object):
     def block_routes_to_terminals(self):
         routes = list()
         route = list()
+        prev_foward = True
         for block, gofoward in self.walk_blocks_by_depth():
             if gofoward:
                 route.append(block)
-                if len(block.postblocks) == 0:
-                    routes.append(route[:])
             else:
+                if prev_foward:
+                    routes.append(route[:])
                 route.remove(block)
-            pass
+            prev_foward = gofoward
         return routes
 
     def operators_path(self, start, end):
@@ -777,52 +778,43 @@ class ElfFile(object):
         _calc_depth()
 
     def _set_pseudo_instructions(self):
-        blocks_threshold = 150
-
-        def _init_automaton(op, opidx):
-            pibot = 0
-            pseudo_dst = self.machine._pseudos[opidx][1][pibot]
-            match = pseudo_dst.search(' '.join(op.op))
-            return match is not None
-
-        def _update_automaton(op, automaton):
-            opidx, pibot, srcs = automaton
-            pseudo_dst = self.machine._pseudos[opidx][1][pibot]
-            match = pseudo_dst.search(' '.join(op.op))
-            if match:
-                automaton[1] += 1
-                return automaton[1]
-            else:
-                automatons.remove(automaton)
-                return 0
-
         for section in self.disasm.sections:
             for func in section.funcs:
-                if len(func.blocks) > blocks_threshold:
-                    break
-                for routeno, blocks_routes in enumerate(func.block_routes_to_terminals()):
-                    ops = list()
-                    for block in blocks_routes:
-                        ops.extend(block.operators)
-                    automatons = list()
-                    for op in ops:
-                        for pidx in range(len(self.machine.pseudos)):
-                            sequence = self.machine._pseudos[pidx][1]
-                            automaton = OperatorSequenceAutomaton(sequence)
-                            automaton.update(op)
-                            if automaton.started():
-                                item = (pidx, automaton)
-                                automatons.append(item)
-                        for item in automatons[:]:
-                            pidx, automaton = item
-                            if automaton.rejected():
-                                automatons.remove(item)
-                                continue
-                            elif automaton.accepted():
-                                dst = self.machine.pseudos[pidx][0]
-                                srcs = automaton.srcs
-                                op.pseudo = (dst[0], srcs)
-                                automatons.remove(item)
-                                continue
-                            automaton.update(op)
-                        pass
+                automatons_stack = list()
+                automatons_stack.append(list())
+                for block, gofoward in func.walk_blocks_by_depth():
+                    if gofoward:
+                        automatons_stack.append(automatons_stack[-1][:])
+                        automatons = [a.copy() for a in automatons_stack[-1]]
+                        for op in block.operators:
+                            def _update_automatons():
+                                for item in automatons[:]:
+                                    pidx, automaton = item
+                                    automaton.update(op)
+                            _update_automatons()
+
+                            def _spawn_automatons():
+                                for pidx in range(len(self.machine.pseudos)):
+                                    sequence = self.machine._pseudos[pidx][1]
+                                    automaton = OperatorSequenceAutomaton(sequence)
+                                    automaton.update(op)
+                                    if automaton.started():
+                                        item = (pidx, automaton)
+                                        automatons.append(item)
+                            _spawn_automatons()
+
+                            def _update_automatons():
+                                for item in automatons[:]:
+                                    pidx, automaton = item
+                                    if automaton.rejected():
+                                        automatons.remove(item)
+                                        continue
+                                    elif automaton.accepted():
+                                        dst = self.machine.pseudos[pidx][0]
+                                        srcs = automaton.srcs
+                                        op.pseudo = (dst[0], srcs)
+                                        automatons.remove(item)
+                                        continue
+                            _update_automatons()
+                    else:
+                        automatons_stack.pop()

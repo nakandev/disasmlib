@@ -42,6 +42,8 @@ class OperatorSequenceAutomaton(object):
         self.state = None
 
     def update(self, operator):
+        if self.accepted() or self.rejected():
+            return
         seqidx = len(self.srcs)
         opstr = ' '.join(operator.op)
         match = re.match(self.sequence[seqidx], opstr)
@@ -49,6 +51,7 @@ class OperatorSequenceAutomaton(object):
             self.srcs.append(operator)
             self.state = len(self.srcs)
         else:
+            self.srcs.append(operator)
             self.state = False
 
     def started(self):
@@ -59,3 +62,9 @@ class OperatorSequenceAutomaton(object):
 
     def accepted(self):
         return self.state == len(self.sequence)
+
+    def copy(self):
+        obj = OperatorSequenceAutomaton(self.sequence)
+        obj.srcs = self.srcs[:]
+        obj.state = self.state
+        return obj
