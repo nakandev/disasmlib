@@ -42,10 +42,14 @@ class DiffAsmTree(object):
                     if block.depth >= len(ranks):
                         ranks.append([])
                     ranks[block.depth].append(block)
-                return ranks
-            # ranks1 = rank_blocks(func1)
-            # ranks2 = rank_blocks(func1)
-            # self._block_pairs[func_pair] = (ranks1, ranks2)
+                blocks = list()
+                while len(blocks) != len(func.blocks):
+                    for rank in ranks:
+                        if len(rank):
+                            blocks.append(rank.pop(0))
+                return blocks
+            # blocks1 = rank_blocks(func1)
+            # blocks2 = rank_blocks(func2)
             blocks1 = [b for b in func1.walk_blocks_by_rank()]
             blocks2 = [b for b in func2.walk_blocks_by_rank()]
             pairs = list()
@@ -96,38 +100,51 @@ class DiffAsmTree(object):
 
     def print_html(self, fpath):
         with open(fpath, 'w') as _f:
-            print('<html><body>', file=_f)
+            print('<html>', file=_f)
+            print('<head>', file=_f)
+            print('<style type="text/css">', file=_f)
+            print('h3 {margin: 10 5 5 5;}', file=_f)
+            print('tt {margin: 0 20 0 10;}', file=_f)
+            print('.eq {}', file=_f)
+            print('.del {background-color: #ccc;}', file=_f)
+            print('.mod {background-color: #ff4;}', file=_f)
+            print('</style>', file=_f)
+            print('</head>', file=_f)
+            print('<body>', file=_f)
+            print('<table border="1" rules="groups">', file=_f)
             for func_pair in self._func_pairs:
                 func1, func2 = func_pair
+                print('<tr><td colspan="2">', file=_f)
                 print('<h3>%s : %s</h3>' % (func1.name, func2.name), file=_f)
-                print('<table border="1" rules="groups">', file=_f)
+                print('</td></tr>', file=_f)
                 for block_pair in self._block_pairs[func_pair]:
                     print('<tbody>', file=_f)
                     for diffline in self._difflines[block_pair]:
                         tag = {
-                            'equal': '&nbsp;',
-                            'delete': '-',
-                            'insert': '+',
-                            'replace': '*',
+                            'equal': ('eq', 'eq'),
+                            'delete': ('mod', 'del'),
+                            'insert': ('del', 'mod'),
+                            'replace': ('mod', 'mod'),
                         }
                         print('<tr>', file=_f)
-                        print('<td>%s</td>' % tag[diffline[0]], file=_f)
-                        print('<td>%s</td>' % diffline[1], file=_f)
-                        print('<td>%s</td>' % diffline[2], file=_f)
+                        print('<td class="%s"><tt>%s</tt></td>' % (tag[diffline[0]][0], diffline[1]), file=_f)
+                        print('<td class="%s"><tt>%s</tt></td>' % (tag[diffline[0]][1], diffline[2]), file=_f)
                         print('</tr>', file=_f)
                     print('</tbody>', file=_f)
-                print('</table>', file=_f)
+            print('</table>', file=_f)
             print('</body></html>', file=_f)
 
 
 def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--toolchain', default=None)
+    argparser.add_argument('--outpath', '-o', default=None)
     argparser.add_argument('elf1')
     argparser.add_argument('elf2')
     args = argparser.parse_args()
     elf1path = args.elf1
     elf2path = args.elf2
+    outpath = 'diff.html' if args.outpath is None else args.outpath
 
     def elf_read(elfpath):
         elf = disasmlib.ElfFile(elfpath)
@@ -138,7 +155,7 @@ def main():
     elf1 = elf_read(elf1path)
     elf2 = elf_read(elf2path)
     diffasm = DiffAsmTree(elf1, elf2)
-    diffasm.print_html('diff.html')
+    diffasm.print_html(outpath)
 
 
 if __name__ == '__main__':
