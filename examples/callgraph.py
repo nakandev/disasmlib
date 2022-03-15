@@ -14,7 +14,7 @@ def main():
     argparser.add_argument('--toolchain', default=None)
     argparser.add_argument('--target', '-T', choices=('dot', 'png', 'svg'), default='dot')
     argparser.add_argument('--hide-alone', default=False, action='store_true')
-    argparser.add_argument('--elf')
+    argparser.add_argument('elf')
     args = argparser.parse_args()
     elfpath = args.elf
 
@@ -43,12 +43,12 @@ def main():
         print('}', file=f)
 
     if args.target == 'dot':
-        f = open(elfpath + '.cfg.dot', 'w')
+        f = open(elfpath + '.call.dot', 'w')
     else:
         f = StringIO()
         print_cfg(f)
         p = subprocess.Popen(
-            ['dot', '-T', args.target, '-o', elfpath + '.cfg.dot.' + args.target],
+            ['dot', '-T', args.target, '-o', elfpath + '.call.dot.' + args.target],
             stdin=subprocess.PIPE)
         p.communicate(input=f.getvalue().encode())
 
