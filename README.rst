@@ -8,10 +8,13 @@ Features
 ========
 
 * Read a few ELF headers
+
   * ELF header
   * Section headers
   * Symbol table headers
+
 * Estimate section/function list even if only disassembly is given
+
 * Build disassembly Control Flow Graph
 
 Requirements
@@ -44,7 +47,7 @@ Usage
   
   elf = disasmlib.ElfFile('test1-riscv.elf')
   elf.set_machine(disasmlib.RISCVMachine())
-  elf.set_toolchain(dir='/your/riscv-gnu-toolchain/bin')
+  elf.set_toolchain('/your/riscv-gnu-toolchain/bin')
   elf.read()
   
   for section in elf.disasm.sections:
@@ -54,4 +57,4 @@ Usage
           for op in block.operators:
               print(hex(op.addr), op.op)
 
-See more examples.
+See examples for more information.

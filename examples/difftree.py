@@ -13,23 +13,30 @@ class DiffAsmTree(object):
         self._generate_diff()
 
     def _correspond_funcs(self):
+        def _get_func(name, funcs):
+            for func in funcs:
+                if name == func.name:
+                    return func
+            return disasmlib.AsmFunc()
+
         funcs1 = self.elf1.disasm.funcs[:]
         funcs2 = self.elf2.disasm.funcs[:]
+        funcs = sorted(funcs1 + funcs2, key=lambda fn: fn.addr)
         pairs = list()
-        for func1 in funcs1[:]:
-            for func2 in funcs2[:]:
-                if func1.name == func2.name:
-                    pairs.append((func1, func2))
-                    funcs1.remove(func1)
-                    funcs2.remove(func2)
-                    break
-        rests = list()
-        for func1 in funcs1:
-            rests.append((func1, None))
-        for func2 in funcs2:
-            rests.append((None, func2))
+        while len(funcs) > 0:
+            func = funcs.pop(0)
+            if func in funcs1:
+                func1 = func
+                func2 = _get_func(func.name, funcs2)
+            elif func in funcs2:
+                func1 = _get_func(func.name, funcs1)
+                func2 = func
+            pairs.append((func1, func2))
+            if func1 in funcs:
+                funcs.remove(func1)
+            if func2 in funcs:
+                funcs.remove(func2)
         self._func_pairs = pairs
-        self._func_rests = rests
 
     def _correspond_blocks(self):
         self._block_pairs = dict()
@@ -58,10 +65,11 @@ class DiffAsmTree(object):
                 pairs.append((blocks1[bidx], blocks2[bidx]))
             rests = list()
             for block1 in blocks1[min_bidx:]:
-                rests.append((block1, None))
+                rests.append((block1, disasmlib.AsmBlock()))
             for block2 in blocks2[min_bidx:]:
-                rests.append((None, block2))
+                rests.append((disasmlib.AsmBlock(), block2))
             self._block_pairs[func_pair] = pairs
+            self._block_pairs[func_pair] += rests
 
     def _generate_diff(self):
         def generate_difflines(sm, block1, block2):
@@ -79,6 +87,20 @@ class DiffAsmTree(object):
                     for offset in range(j2 - j1):
                         dline1 = ''
                         dline2 = _lines2[j1 + offset]
+                        difflines.append((tag, dline1, dline2))
+                elif tag == 'replace':
+                    minlen = min(i2 - i1, j2 - j1)
+                    for offset in range(minlen):
+                        dline1 = _lines1[i1 + offset]
+                        dline2 = _lines2[j1 + offset]
+                        difflines.append((tag, dline1, dline2))
+                    for offset in range((i2 - i1) - minlen):
+                        dline1 = _lines1[i1 + offset + minlen]
+                        dline2 = ''
+                        difflines.append((tag, dline1, dline2))
+                    for offset in range((j2 - j1) - minlen):
+                        dline1 = ''
+                        dline2 = _lines2[j1 + offset + minlen]
                         difflines.append((tag, dline1, dline2))
                 else:  # 'replace' or 'equal'
                     for offset in range(i2 - i1):

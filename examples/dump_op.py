@@ -5,8 +5,8 @@ import disasmlib
 
 def main():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--elf', default=None)
     argparser.add_argument('--toolchain', default=None)
+    argparser.add_argument('elf')
     args = argparser.parse_args()
     elfpath = args.elf
 

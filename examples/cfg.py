@@ -11,12 +11,12 @@ else:
 
 def main():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--elf', default=None)
     argparser.add_argument('--toolchain', default=None)
     argparser.add_argument('--target', '-T', choices=('dot', 'png', 'svg'), default='dot')
     argparser.add_argument('--vertical', default=False, action='store_true')
     argparser.add_argument('--max-depth', '-d', default=20, type=int)
     argparser.add_argument('--func', '-f',  default=None)
+    argparser.add_argument('elf')
     args = argparser.parse_args()
     elfpath = args.elf
 
